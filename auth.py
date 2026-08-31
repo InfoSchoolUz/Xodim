@@ -59,9 +59,63 @@ def current_user():
     return st.session_state.get("user")
 
 
+def _any_user_exists() -> bool:
+    session = get_session()
+    try:
+        return session.query(User).first() is not None
+    finally:
+        session.close()
+
+
+def _first_time_setup():
+    """Bazada hech qanday foydalanuvchi yo'q bo'lsa (masalan, Streamlit Cloud'da
+    terminal orqali seed.py ishlatib bo'lmagani uchun), birinchi Bosh administratorni
+    to'g'ridan-to'g'ri sayt orqali yaratish imkonini beradi."""
+    st.title("🛠️ Birinchi sozlash")
+    st.caption("Bazada hali hech qanday foydalanuvchi yo'q. Birinchi Bosh administratorni yarating.")
+    with st.form("setup_form"):
+        login_val = st.text_input("Yangi login (masalan: admin)")
+        password_val = st.text_input("Yangi parol (kamida 8 belgi)", type="password")
+        password_confirm = st.text_input("Parolni takrorlang", type="password")
+        submitted = st.form_submit_button("Administrator yaratish")
+
+    if submitted:
+        if not login_val.strip():
+            st.error("Login kiriting.")
+            return
+        if len(password_val) < 8:
+            st.error("Parol kamida 8 belgidan iborat bo'lishi kerak.")
+            return
+        if password_val != password_confirm:
+            st.error("Parollar mos kelmadi.")
+            return
+
+        session = get_session()
+        try:
+            # Ikkinchi tekshiruv — shu payt orasida boshqa birov allaqachon yaratgan bo'lishi mumkin.
+            if session.query(User).first() is not None:
+                st.warning("Boshqa foydalanuvchi allaqachon yaratildi. Sahifani yangilang va tizimga kiring.")
+                return
+            session.add(User(
+                login=login_val.strip(),
+                password_hash=hash_password(password_val),
+                role="superadmin",
+                full_name="Bosh administrator",
+            ))
+            session.commit()
+            st.success("✅ Administrator yaratildi! Endi shu login/parol bilan tizimga kiring.")
+            st.rerun()
+        finally:
+            session.close()
+    st.stop()
+
+
 def require_login():
     """Sahifa boshida chaqiriladi — tizimga kirmagan bo'lsa, login formasini ko'rsatib to'xtaydi."""
     if "user" not in st.session_state or st.session_state["user"] is None:
+        if not _any_user_exists():
+            _first_time_setup()
+
         st.title("🔐 Tizimga kirish")
         st.caption("Toshkent viloyati maktabgacha va maktab ta'limi boshqarmasi")
         with st.form("login_form"):
